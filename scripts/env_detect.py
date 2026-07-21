@@ -10,6 +10,7 @@ import io
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,7 @@ class EnvDetect:
             "encoding": self._detect_encoding(),
             "path_tools": self._detect_path_tools(),
             "long_path_support": self._detect_long_path_support(),
+            "capabilities": self._detect_capabilities(),
         }
         return self._info
 
@@ -171,6 +173,92 @@ class EnvDetect:
                 return bool(value)
         except Exception:  # noqa: BLE001
             return None
+
+    # ------------------------------------------------------------------
+    # Capability detection (extended): tool versions + platform features
+    # ------------------------------------------------------------------
+    def _tool_version(self, tool: str, args: list[str], pattern: str = r"([\d][\d.]*)") -> Any:
+        """Return the detected version string of a CLI tool, or None if absent.
+
+        Returns ``True`` when the tool exists but its version cannot be parsed
+        (so callers still know the capability is present).
+        """
+        exe = shutil.which(tool)
+        if not exe:
+            return None
+        try:
+            r = subprocess.run(
+                [exe, *args],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                encoding="utf-8",
+                errors="replace",
+            )
+            out = (r.stdout or r.stderr).strip()
+            m = re.search(pattern, out)
+            if m:
+                return m.group(1)
+            return out.splitlines()[0] if out else True
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _detect_capabilities(self) -> dict[str, Any]:
+        caps: dict[str, Any] = {
+            "python": self._tool_version("python", ["--version"]) or self._tool_version("python3", ["--version"]),
+            "node": self._tool_version("node", ["--version"]),
+            "npm": self._tool_version("npm", ["--version"]),
+            "git": self._tool_version("git", ["--version"]),
+            "cargo": self._tool_version("cargo", ["--version"]),
+            "go": self._tool_version("go", ["version"]),
+            "java": self._tool_version("java", ["-version"]),
+            "docker": self._tool_version("docker", ["--version"]),
+        }
+        caps["wsl"] = self._detect_wsl()
+        caps["admin"] = self._detect_admin()
+        caps["network"] = self._detect_network()
+        return caps
+
+    def _detect_wsl(self) -> bool:
+        """True only when a WSL distro is actually installed (not just the stub)."""
+        exe = shutil.which("wsl")
+        if not exe:
+            return False
+        try:
+            r = subprocess.run(
+                [exe, "-l", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if r.returncode != 0:
+                return False
+            return bool([l for l in r.stdout.splitlines() if l.strip()])
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _detect_admin(self) -> bool | None:
+        """Best-effort elevation check (Windows only)."""
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _detect_network(self) -> bool:
+        """Best-effort outbound connectivity probe."""
+        import socket
+        try:
+            socket.setdefaulttimeout(2)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(("8.8.8.8", 53))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def main() -> int:

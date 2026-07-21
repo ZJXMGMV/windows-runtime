@@ -4,6 +4,19 @@ All notable changes to this skill are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `capabilities` subcommand — emits a declarative Capabilities Manifest for
+  agent *planning*: which ops to route through `wrap` (native, no shell) vs
+  `exec` (needs a shell), plus detected toolchain versions and platform facts.
+- `env_detect` capability extension: detected versions for `python`, `node`,
+  `npm`, `git`, `cargo`, `go`, `java`, `docker`; plus `wsl` (real distro
+  installed?), `admin` (elevation), `network` (outbound probe).
+- `scripts/capabilities.py` — manifest builder (`build_manifest`) consumed by
+  both `capabilities` and `detect`.
+- SKILL.md section + Quick start entry for the `capabilities` manifest.
+
 ## [1.0.0] - 2026-07-21
 
 ### Added

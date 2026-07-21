@@ -23,19 +23,23 @@ Use this skill when:
    ```powershell
    python scripts/cli.py detect --json
    ```
-2. Translate a command to PowerShell syntax:
+2. Emit the capabilities manifest (for agent planning — which ops to route through `wrap`):
+   ```powershell
+   python scripts/cli.py capabilities
+   ```
+3. Translate a command to PowerShell syntax:
    ```powershell
    python scripts/cli.py translate "rm -rf ./temp"
    ```
-3. Execute a translated command:
+4. Execute a translated command:
    ```powershell
    python scripts/cli.py exec "cat a.txt | grep hello"
    ```
-4. Generate a system prompt fragment:
+5. Generate a system prompt fragment:
    ```powershell
    python scripts/cli.py prompt
    ```
-5. Run a safe tool wrapper:
+6. Run a safe tool wrapper:
    ```powershell
    python scripts/cli.py wrap mkdir ./build
    ```
@@ -75,6 +79,21 @@ For operations that are fragile or error-prone across shells, use Python wrapper
 - `safe_env(name, value=None)` / `safe_path(path)`
 
 See [references/tool-wrappers.md](references/tool-wrappers.md) for details.
+
+## Capabilities manifest (P2)
+
+`capabilities` emits a declarative manifest the agent should read during *planning* so it knows which ops to route through `wrap` (native, no shell) vs `exec` (needs a shell). The manifest exposes:
+
+- `native` — which file ops are natively supported (always true; `tool_wrap` uses stdlib)
+- `toolchain` — detected versions of python/node/npm/git/cargo/go/java/docker, plus `wsl_distro`
+- `platform` — `preferred_shell`, `admin`, `network`, `long_path_support`
+- `guidance.use_wrap_for` — ops to prefer `wrap` for, e.g. `["write","copy","move",...]`
+
+```powershell
+python scripts/cli.py capabilities
+```
+
+`detect` also returns the extended capability block (`python`, `node`, `git`, `cargo`, `docker`, `wsl`, `admin`, `network`, version strings).
 
 ## Common Windows errors
 

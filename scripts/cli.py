@@ -13,6 +13,7 @@ from env_detect import EnvDetect
 from exec_runner import ExecRunner
 from output_parser import OutputParser
 from prompt_gen import generate_prompt
+from capabilities import build_manifest
 from tool_wrap import OPERATIONS
 
 
@@ -92,6 +93,13 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_capabilities(args: argparse.Namespace) -> int:
+    env = EnvDetect().detect()
+    manifest = build_manifest(env)
+    print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    return 0
+
+
 def cmd_wrap(args: argparse.Namespace) -> int:
     operation = args.operation
     if operation not in OPERATIONS:
@@ -161,6 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_wrap.add_argument("operation", help=f"One of: {', '.join(OPERATIONS.keys())}")
     p_wrap.add_argument("args", nargs=argparse.REMAINDER, help="Arguments for the operation")
     p_wrap.set_defaults(func=cmd_wrap)
+
+    p_cap = sub.add_parser("capabilities", help="Emit capabilities manifest for agent planning")
+    p_cap.set_defaults(func=cmd_capabilities)
 
     return parser
 
