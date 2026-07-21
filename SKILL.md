@@ -82,6 +82,7 @@ See [references/error-patterns.md](references/error-patterns.md) for common erro
 
 ## Resources
 
+- [references/architecture.md](references/architecture.md) — architecture, call-flow diagrams, and translation engine
 - [references/command-registry.md](references/command-registry.md) — command translation rules
 - [references/agent-workflow.md](references/agent-workflow.md) — agent usage flow examples
 - [references/error-patterns.md](references/error-patterns.md) — error patterns and fixes
