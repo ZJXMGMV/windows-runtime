@@ -3,6 +3,7 @@
 
 Runs every test module in tests/ and aggregates results. Currently:
   - test_recovery_rules.py : data-driven recovery-rule regression + anti-interference net
+  - test_adapter_rules.py  : data-driven command-translation regression + anti-shadowing net
 
 Add new test modules here as the suite grows. Exit 0 = all green, 1 = any failure.
 """
@@ -17,6 +18,7 @@ sys.path.insert(0, HERE)
 
 TEST_MODULES = [
     "test_recovery_rules",
+    "test_adapter_rules",
 ]
 
 

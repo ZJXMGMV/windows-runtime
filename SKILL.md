@@ -154,13 +154,21 @@ Run the suite from the skill root:
 python tests/run_all.py
 ```
 
-It runs `tests/test_recovery_rules.py` — a data-driven harness over
-`tests/recovery_fixtures.json` that, for every recovery rule, asserts (1)
-positive samples classify to the right category, (2) they do **not** trip any
-undeclared category (cross-rule interference net), (3) negative samples stay
-unmatched, and (4) auto-recovery actions resolve as expected. It also fails if
-any registered rule lacks fixtures — so a new rule cannot land without its own
-positive/negative samples. **Add a fixture entry whenever you add a recovery rule.**
+It runs two data-driven harnesses:
+
+- `tests/test_recovery_rules.py` over `recovery_fixtures.json` — for every
+  recovery rule, asserts (1) positive samples classify to the right category,
+  (2) they do **not** trip any undeclared category (cross-rule interference
+  net), (3) negative samples stay unmatched, and (4) auto-recovery actions
+  resolve as expected.
+- `tests/test_adapter_rules.py` over `adapter_fixtures.json` — for every
+  command-translation rule, asserts routing (**anti-shadowing net**:
+  ordering-sensitive rules like `cat` vs `cat | grep` keep matching the
+  intended rule), exact per-shell output, and fallback behavior.
+
+Both include a coverage gate that fails if any registered rule lacks a fixture,
+so a new rule cannot land without a test. **Add a fixture entry whenever you
+add a recovery rule or a translation rule.**
 
 ## Resources
 

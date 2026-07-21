@@ -1,0 +1,129 @@
+{
+  "_doc": "Command-translation self-test fixtures for cmd_adapter.py. Each case gives an input command and asserts (a) which rule it routes to (expect_rule, or null+expect_fallback for unmatched), and (b) exact translated output per shell (outputs.{pwsh,cmd,bash}; only listed shells are checked). Routing assertions are the anti-shadowing net: they guarantee ordering-sensitive rules (cat vs cat|grep, echo env vs echo literal, ls/ls simple/ls bare) keep matching the intended rule as the ruleset grows.",
+
+  "cases": [
+    {
+      "in": "rm -rf ./x", "expect_rule": "rm -rf", "expect_fallback": false,
+      "outputs": {
+        "pwsh": "Remove-Item -Path './x' -Recurse -Force -ErrorAction SilentlyContinue | Out-Null",
+        "cmd": "rmdir /S /Q \"./x\" 2>nul || del /F /Q \"./x\" 2>nul",
+        "bash": "rm -rf './x'"
+      }
+    },
+    {
+      "in": "rm -f a.txt", "expect_rule": "rm -f", "expect_fallback": false,
+      "outputs": {"pwsh": "Remove-Item -Path 'a.txt' -Force -ErrorAction SilentlyContinue"}
+    },
+    {
+      "in": "mkdir -p a/b", "expect_rule": "mkdir -p", "expect_fallback": false,
+      "outputs": {"pwsh": "if (-not (Test-Path 'a/b')) { New-Item -ItemType Directory -Path 'a/b' -Force | Out-Null }"}
+    },
+    {
+      "in": "cp -r s d", "expect_rule": "cp -r", "expect_fallback": false,
+      "outputs": {"pwsh": "Copy-Item -Path 's' -Destination 'd' -Recurse -Force", "cmd": "xcopy \"s\" \"d\" /E /I /Y"}
+    },
+    {
+      "in": "mv a b", "expect_rule": "mv", "expect_fallback": false,
+      "outputs": {"pwsh": "Move-Item -Path 'a' -Destination 'b' -Force"}
+    },
+    {
+      "in": "touch f.txt", "expect_rule": "touch", "expect_fallback": false,
+      "outputs": {"cmd": "copy /Y nul \"f.txt\" >nul 2>&1"}
+    },
+    {
+      "in": "cat a.txt", "expect_rule": "cat", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Content -Path 'a.txt' -Raw", "cmd": "type \"a.txt\""}
+    },
+    {
+      "in": "cat a.txt | grep hi", "expect_rule": "cat | grep", "expect_fallback": false,
+      "outputs": {
+        "pwsh": "Select-String -Path 'a.txt' -Pattern 'hi' -CaseSensitive:$false | ForEach-Object { $_.Line }",
+        "cmd": "findstr /I /C:\"hi\" \"a.txt\""
+      }
+    },
+    {
+      "in": "grep -i foo bar.txt", "expect_rule": "grep file", "expect_fallback": false,
+      "outputs": {
+        "pwsh": "Select-String -Path 'bar.txt' -Pattern 'foo' -CaseSensitive:$false | ForEach-Object { $_.Line }",
+        "bash": "grep -i 'foo' 'bar.txt'"
+      }
+    },
+    {
+      "in": "find . -name *.py", "expect_rule": "find files", "expect_fallback": false,
+      "outputs": {
+        "pwsh": "Get-ChildItem -Path '.' -Recurse -Filter '*.py' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName",
+        "cmd": "dir /S /B \".\\*.py\""
+      }
+    },
+    {
+      "in": "export FOO=bar", "expect_rule": "export", "expect_fallback": false,
+      "outputs": {"pwsh": "$env:FOO = 'bar'", "cmd": "set FOO=bar"}
+    },
+    {
+      "in": "unset FOO", "expect_rule": "unset", "expect_fallback": false,
+      "outputs": {"pwsh": "Remove-Item -Path env:FOO -ErrorAction SilentlyContinue"}
+    },
+    {
+      "in": "echo $PATH", "expect_rule": "echo env", "expect_fallback": false,
+      "outputs": {"pwsh": "Write-Output $env:PATH", "cmd": "echo %PATH%"}
+    },
+    {
+      "in": "echo hello world", "expect_rule": "echo literal", "expect_fallback": false,
+      "outputs": {"pwsh": "Write-Output \"hello world\"", "cmd": "echo hello world"}
+    },
+    {
+      "in": "chmod +x s.sh", "expect_rule": "chmod +x", "expect_fallback": false,
+      "outputs": {"cmd": "REM chmod has no equivalent on Windows"}
+    },
+    {
+      "in": "ls", "expect_rule": "ls bare", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem", "cmd": "dir", "bash": "ls"}
+    },
+    {
+      "in": "ls -la", "expect_rule": "ls", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem -Force", "cmd": "dir", "bash": "ls -la"}
+    },
+    {
+      "in": "ls -la /tmp", "expect_rule": "ls", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem -Path '/tmp' -Force", "bash": "ls -la '/tmp'"}
+    },
+    {
+      "in": "ls /tmp", "expect_rule": "ls simple", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem -Path '/tmp'"}
+    },
+    {
+      "in": "pwd", "expect_rule": "pwd", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Location | Select-Object -ExpandProperty Path", "cmd": "cd"}
+    },
+    {
+      "in": "which git", "expect_rule": "which", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Command git -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source", "cmd": "where git"}
+    },
+    {
+      "in": "head -n 5 f.txt", "expect_rule": "head", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Content -Path 'f.txt' -TotalCount 5"}
+    },
+    {
+      "in": "tail -n 3 f.txt", "expect_rule": "tail", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Content -Path 'f.txt' -Tail 3"}
+    },
+    {
+      "in": "wc -l f.txt", "expect_rule": "wc -l", "expect_fallback": false,
+      "outputs": {"pwsh": "(Get-Content -Path 'f.txt' | Measure-Object -Line).Lines", "cmd": "find /C /V \"\" < \"f.txt\""}
+    },
+
+    {"in": "git status", "expect_rule": null, "expect_fallback": true},
+    {"in": "docker ps -a", "expect_rule": null, "expect_fallback": true},
+    {"in": "npm install", "expect_rule": null, "expect_fallback": true},
+    {"in": "", "expect_rule": null, "expect_fallback": false}
+  ],
+
+  "routing_only": [
+    {"in": "cat a.txt | grep hi", "expect_rule": "cat | grep", "_why": "pipe form must beat bare cat"},
+    {"in": "echo $HOME", "expect_rule": "echo env", "_why": "env form must beat echo literal"},
+    {"in": "echo just text", "expect_rule": "echo literal", "_why": "literal fallthrough"},
+    {"in": "ls", "expect_rule": "ls bare", "_why": "bare ls not shadowed by ls/ls simple"},
+    {"in": "ls -a", "expect_rule": "ls", "_why": "flag form"},
+    {"in": "ls dir", "expect_rule": "ls simple", "_why": "path-only form"}
+  ]
+}

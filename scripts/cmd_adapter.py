@@ -85,6 +85,10 @@ class CommandTranslator:
         import re as _re
         result = _re.sub(r"\s+-Path\s+''(\s|$)", r"\1", result)
         result = _re.sub(r"\s+-Path\s+\"\"(\s|$)", r"\1", result)
+        # Clean up a trailing stray empty single-quote pair left by an empty
+        # capture (e.g. bash `ls -la ''`). Anchored to end-of-string so it never
+        # touches an intentional empty arg mid-template (e.g. cmd `find /C /V ""`).
+        result = _re.sub(r"\s+''\s*$", "", result)
         # Clean up double spaces left by empty substitutions
         result = _re.sub(r"  +", " ", result)
         return result.strip()

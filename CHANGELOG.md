@@ -7,6 +7,20 @@ All notable changes to this skill are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Command-translation self-test harness** (`tests/test_adapter_rules.py` +
+  `adapter_fixtures.json`): data-driven over all 23 translation rules. Asserts
+  routing (**anti-shadowing net** — ordering-sensitive rules like `cat` vs
+  `cat | grep`, `echo env` vs `echo literal`, `ls`/`ls simple`/`ls bare` keep
+  matching the intended rule), exact per-shell output, and fallback behavior.
+  Coverage gate blocks any new rule shipped without a fixture. Wired into
+  `run_all.py`. Meta-verified: catches injected rule shadowing. 77 checks green.
+
+### Fixed (surfaced by the adapter harness)
+- `ls -la` (no path) produced a stray trailing empty-quote pair in the bash
+  output (`ls -la ''`). `_render` now strips a trailing `''` — anchored to
+  end-of-string so it never touches an intentional mid-template empty arg
+  (e.g. cmd `find /C /V ""` in the `wc -l` rule).
+
 - **Recovery rule self-test harness** (`tests/`): `run_all.py` entry point +
   `test_recovery_rules.py` data-driven over `recovery_fixtures.json`. For every
   rule it asserts positive-match, **anti-interference** (positives must not trip
