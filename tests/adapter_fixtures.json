@@ -111,6 +111,34 @@
       "in": "wc -l f.txt", "expect_rule": "wc -l", "expect_fallback": false,
       "outputs": {"pwsh": "(Get-Content -Path 'f.txt' | Measure-Object -Line).Lines", "cmd": "find /C /V \"\" < \"f.txt\""}
     },
+    {
+      "in": "du -sh ./src", "expect_rule": "du -sh", "expect_fallback": false,
+      "outputs": {"pwsh": "'{0:N2} MB' -f ((Get-ChildItem -Path './src' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB)"}
+    },
+    {
+      "in": "kill 1234", "expect_rule": "kill", "expect_fallback": false,
+      "outputs": {"pwsh": "Stop-Process -Id 1234 -Force -ErrorAction SilentlyContinue", "cmd": "taskkill /PID 1234 /F"}
+    },
+    {
+      "in": "kill -9 5678", "expect_rule": "kill -9", "expect_fallback": false,
+      "outputs": {"pwsh": "Stop-Process -Id 5678 -Force -ErrorAction SilentlyContinue", "cmd": "taskkill /PID 5678 /F"}
+    },
+    {
+      "in": "diff a.txt b.txt", "expect_rule": "diff", "expect_fallback": false,
+      "outputs": {"pwsh": "Compare-Object (Get-Content 'a.txt') (Get-Content 'b.txt')", "cmd": "fc \"a.txt\" \"b.txt\""}
+    },
+    {
+      "in": "env", "expect_rule": "env", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem env: | Format-Table -AutoSize", "cmd": "set"}
+    },
+    {
+      "in": "printenv", "expect_rule": "env", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem env: | Format-Table -AutoSize"}
+    },
+    {
+      "in": "curl -s https://example.com", "expect_rule": "curl", "expect_fallback": false,
+      "outputs": {"pwsh": "curl.exe -s https://example.com", "cmd": "curl.exe -s https://example.com"}
+    },
 
     {"in": "git status", "expect_rule": null, "expect_fallback": true},
     {"in": "docker ps -a", "expect_rule": null, "expect_fallback": true},

@@ -169,6 +169,88 @@ def _try_execution_policy_bypass(parsed: dict, env: dict | None) -> RecoveryActi
 
 
 # ---------------------------------------------------------------------------
+# Suggested-command builders (deterministic, no auto-execution)
+# ---------------------------------------------------------------------------
+
+SuggestedCommandBuilder = Callable[[dict, dict | None], str | None]
+
+_SUGGESTED_COMMAND_BUILDERS: dict[str, SuggestedCommandBuilder] = {}
+
+
+def _register_suggest(category: str, builder: SuggestedCommandBuilder) -> None:
+    _SUGGESTED_COMMAND_BUILDERS[category] = builder
+
+
+def _suggest_path_fix(parsed: dict, env: dict | None) -> str | None:
+    """path_not_found: extract the failing path from stderr, resolve/normalize it,
+    and rebuild the original command with the corrected path."""
+    stderr = parsed.get("stderr", "")
+    original = parsed.get("original", "")
+    if not original or not stderr:
+        return None
+    # Extract path from common error messages (quoted or after keyword)
+    path_patterns = [
+        r"['\"\u2018\u2019\u201c\u201d]([^'\"\u2018\u2019\u201c\u201d]+)['\"\u2018\u2019\u201c\u201d]",
+        r"(?:path|file|路径|文件)\s+['\"]?([^\s'\"<>|]+)",
+    ]
+    extracted: str | None = None
+    for pat in path_patterns:
+        m = re.search(pat, stderr)
+        if m:
+            extracted = m.group(1)
+            break
+    if not extracted:
+        return None
+    # Normalize via PathResolver (handles /mnt/c, forward slashes, UNC, ~)
+    try:
+        from path_resolver import PathResolver
+        resolved = PathResolver().resolve(extracted)
+        if resolved and resolved != extracted:
+            return original.replace(extracted, resolved)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _suggest_force_flag(parsed: dict, env: dict | None) -> str | None:
+    """already_exists: append -Force (pwsh) or /Y (cmd) to the translated command."""
+    translated = parsed.get("translated", "")
+    shell_used = parsed.get("shell_used", "pwsh")
+    if not translated:
+        return None
+    if shell_used in ("pwsh", "powershell"):
+        if "-Force" not in translated:
+            return translated + " -Force"
+    elif shell_used == "cmd":
+        lower = translated.lower()
+        if lower.startswith(("copy", "xcopy", "move")):
+            return translated + " /Y"
+    return None
+
+
+def _suggest_recursive_rm(parsed: dict, env: dict | None) -> str | None:
+    """directory_not_empty: upgrade to recursive remove."""
+    translated = parsed.get("translated", "")
+    shell_used = parsed.get("shell_used", "pwsh")
+    if not translated:
+        return None
+    if shell_used in ("pwsh", "powershell"):
+        if "Remove-Item" in translated and "-Recurse" not in translated:
+            return translated + " -Recurse -Force"
+    elif shell_used == "cmd":
+        lower = translated.lower().strip()
+        if lower.startswith("rmdir"):
+            rest = translated.strip()[len("rmdir"):].strip()
+            return f"rmdir /S /Q {rest}"
+    return None
+
+
+_register_suggest("path_not_found", _suggest_path_fix)
+_register_suggest("already_exists", _suggest_force_flag)
+_register_suggest("directory_not_empty", _suggest_recursive_rm)
+
+
+# ---------------------------------------------------------------------------
 # Register all recovery rules
 # ---------------------------------------------------------------------------
 
@@ -188,7 +270,7 @@ _register(
 
 _register(
     "path_not_found",
-    r"系统找不到指定的(路径|文件)|找不到路径|找不到文件|无法找到路径|The system cannot find the (path|file)|No such file or directory",
+    r"系统找不到指定的(路径|文件)|找不到路径|找不到文件|无法找到路径|The system cannot find the (path|file)|Cannot find (path|drive)|No such file or directory",
     "Path does not exist. Verify with `Test-Path` or `dir` before retrying.",
 )
 
@@ -382,12 +464,19 @@ class RecoveryEngine:
                 continue
 
             severity = "high" if category in _HIGH_SEVERITY else "medium"
-            suggestions.append({
+            suggestion: dict[str, Any] = {
                 "category": category,
                 "severity": severity,
                 "message": hint.split(".")[0] if "." in hint else hint,
                 "fix_hint": hint,
-            })
+            }
+            # Attach a ready-to-exec corrected command if a builder exists
+            suggest_builder = _SUGGESTED_COMMAND_BUILDERS.get(category)
+            if suggest_builder:
+                suggested_cmd = suggest_builder(result, self._env)
+                if suggested_cmd:
+                    suggestion["suggested_command"] = suggested_cmd
+            suggestions.append(suggestion)
 
             if auto_builder and auto_action is None:
                 auto_action_candidate = auto_builder(result, self._env)

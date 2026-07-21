@@ -14,7 +14,7 @@ from exec_runner import ExecRunner
 from output_parser import OutputParser
 from prompt_gen import generate_prompt
 from capabilities import build_manifest
-from tool_wrap import OPERATIONS
+from tool_wrap import OPERATIONS, grep_from_args
 from path_resolver import PathResolver
 from tool_discovery import ToolDiscovery
 from recovery import RecoveryEngine
@@ -31,7 +31,7 @@ def _configure_utf8_stdout() -> None:
 
 
 def cmd_detect(args: argparse.Namespace) -> int:
-    env = EnvDetect().detect()
+    env = EnvDetect().detect(force=args.force)
     if args.json:
         print(json.dumps(env, indent=2, ensure_ascii=False))
     else:
@@ -137,15 +137,15 @@ def cmd_wrap(args: argparse.Namespace) -> int:
         print(f"Unknown operation: {operation}", file=sys.stderr)
         print(f"Available: {', '.join(OPERATIONS.keys())}", file=sys.stderr)
         return 1
-    # `write` cannot take multi-line content via CLI args (shell quoting mangles
-    # newlines). Support `--from-file <path>` to read content from a file.
-    if operation == "write":
+    # `write` and `append` cannot take multi-line content via CLI args (shell quoting
+    # mangles newlines). Support `--from-file <path>` to read content from a file.
+    if operation in ("write", "append"):
         pos = [a for a in args.args if a != "--from-file"]
         if "--from-file" in args.args:
             idx = list(args.args).index("--from-file")
             src = args.args[idx + 1]
             content = Path(src).read_text(encoding="utf-8", errors="replace")
-            func = OPERATIONS["write"]
+            func = OPERATIONS[operation]
             try:
                 func(pos[0], content)
                 return 0
@@ -153,13 +153,24 @@ def cmd_wrap(args: argparse.Namespace) -> int:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
         # no --from-file: single positional content still supported for simple text
-        func = OPERATIONS["write"]
+        func = OPERATIONS[operation]
         try:
             func(*pos)
             return 0
         except Exception as exc:  # noqa: BLE001
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+    if operation == "grep":
+        # Route through grep_from_args so the enhanced flags
+        # (--context/--exclude-dir/--include/--case-sensitive) reach safe_grep.
+        try:
+            matches = grep_from_args(list(args.args))
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        for line in matches:
+            print(line)
+        return 0
     func = OPERATIONS[operation]
     try:
         result = func(*args.args)
@@ -171,12 +182,128 @@ def cmd_wrap(args: argparse.Namespace) -> int:
         return 1
 
 
+# ---------------------------------------------------------------------------
+# Daemon mode: dispatch + serve
+# ---------------------------------------------------------------------------
+
+def dispatch(action: str, params: dict) -> dict:
+    """Route an action to the appropriate handler and return a result dict.
+
+    Used by both the `serve` daemon and potentially by programmatic callers.
+    Returns {"ok": True, ...} on success or {"ok": False, "error": "..."} on failure.
+    """
+    try:
+        if action == "detect":
+            force = params.get("force", False)
+            return {"ok": True, "env": EnvDetect().detect(force=force)}
+
+        elif action == "translate":
+            cmd = params.get("command", "")
+            shell = params.get("shell") or _default_shell()
+            translator = CommandTranslator()
+            result = translator.translate(cmd, shell=shell)
+            return {"ok": True, **result}
+
+        elif action == "exec":
+            cmd = params.get("command", "")
+            shell = params.get("shell") or _default_shell()
+            cwd = params.get("cwd")
+            retries = params.get("retries", 1)
+            recover = params.get("recover", True)
+            runner = ExecRunner(preferred_shell=shell)
+            result = runner.run(cmd, shell=shell, cwd=cwd, retries=retries, recover=recover)
+            return {"ok": result["ok"], **result}
+
+        elif action == "prompt":
+            env = EnvDetect().detect()
+            return {"ok": True, "prompt": generate_prompt(env)}
+
+        elif action == "capabilities":
+            env = EnvDetect().detect()
+            return {"ok": True, "manifest": build_manifest(env)}
+
+        elif action == "resolve":
+            path = params.get("path", "")
+            resolved = PathResolver().resolve(path)
+            return {"ok": True, "resolved": resolved}
+
+        elif action == "discover":
+            td = ToolDiscovery()
+            tool = params.get("tool")
+            if tool:
+                return {"ok": True, "tool": td.resolve(tool)}
+            return {"ok": True, "tools": td.discover_all()}
+
+        elif action == "recover":
+            exec_result = params.get("result")
+            if not isinstance(exec_result, dict):
+                return {"ok": False, "error": "params.result must be a dict (ExecRunner result)"}
+            analysis = RecoveryEngine().analyze(exec_result)
+            return {"ok": True, **analysis}
+
+        elif action == "wrap":
+            operation = params.get("operation", "")
+            op_args = params.get("args", [])
+            if operation not in OPERATIONS:
+                return {"ok": False, "error": f"Unknown operation: {operation}. Available: {', '.join(OPERATIONS.keys())}"}
+            if operation == "grep":
+                # Route through grep_from_args so the enhanced flags
+                # (--context/--exclude-dir/--include/--case-sensitive) reach safe_grep.
+                return {"ok": True, "matches": grep_from_args(list(op_args))}
+            func = OPERATIONS[operation]
+            result = func(*op_args)
+            return {"ok": True, "result": result}
+
+        else:
+            return {"ok": False, "error": f"Unknown action: {action}"}
+
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run as a JSON-line daemon on stdin/stdout.
+
+    Protocol: one JSON object per line in, one JSON object per line out.
+    Request:  {"action": "translate", "params": {"command": "ls -la", "shell": "pwsh"}}
+    Response: {"ok": true, "translated": "Get-ChildItem ...", ...}
+    Send {"action": "quit"} to shut down gracefully.
+    """
+    # Emit a ready banner so the caller knows the process is alive
+    print(json.dumps({"ok": True, "ready": True, "actions": [
+        "detect", "translate", "exec", "prompt", "capabilities",
+        "resolve", "discover", "recover", "wrap", "quit",
+    ]}), flush=True)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(json.dumps({"ok": False, "error": f"Invalid JSON: {exc}"}), flush=True)
+            continue
+
+        action = request.get("action", "")
+        if action == "quit":
+            print(json.dumps({"ok": True, "bye": True}), flush=True)
+            break
+
+        params = request.get("params", {})
+        response = dispatch(action, params)
+        print(json.dumps(response, ensure_ascii=False), flush=True)
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wincompat", description="Windows Agent Compatibility layer")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_detect = sub.add_parser("detect", help="Detect current Windows environment")
     p_detect.add_argument("--json", action="store_true", help="Output JSON")
+    p_detect.add_argument("--force", action="store_true", help="Bypass cache and re-detect")
     p_detect.set_defaults(func=cmd_detect)
 
     p_translate = sub.add_parser("translate", help="Translate a Bash-style command to target shell")
@@ -216,6 +343,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_recover = sub.add_parser("recover", help="Analyze an exec result JSON and suggest recovery")
     p_recover.add_argument("result_json", help="ExecRunner result as JSON string")
     p_recover.set_defaults(func=cmd_recover)
+
+    p_serve = sub.add_parser("serve", help="Run as a JSON-line daemon (stdin/stdout protocol)")
+    p_serve.set_defaults(func=cmd_serve)
 
     return parser
 

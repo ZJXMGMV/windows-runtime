@@ -14,3 +14,18 @@ Rules:
 3. For file operations, prefer the tool wrappers in this skill (`safe_rm`, `safe_mkdir`, etc.) instead of raw shell commands.
 4. Always quote paths that contain spaces: `& "C:\Program Files\..."` for PowerShell, `"C:\Program Files\..."` for cmd.
 5. Use `$env:NAME = value` for environment variables in PowerShell, not `export`.
+
+DO NOT:
+- Use `rm -rf /` or recursive delete on system paths (C:\, C:\Windows, C:\Users).
+- Assume `chmod`/`chown` have any effect — NTFS has no Unix permission bits.
+- Use Bash-specific syntax: process substitution `<()`, arrays `arr=()`, `[[ ]]`, `$(...)` inside cmd.exe.
+- Pipe through `xargs` without an explicit `-I{{}}` placeholder — Windows has no xargs.
+- Use `sed -i` or `awk` one-liners — use PowerShell `-replace` or the `wrap write` tool instead.
+- Assume `/dev/null` exists — use `$null` (PowerShell) or `NUL` (cmd).
+- Use `source` or `.` to load scripts — use `. .\script.ps1` (dot-source) in PowerShell.
+
+ALWAYS:
+- Use forward slashes or let `resolve` normalize paths before passing to shell commands.
+- Quote paths containing spaces or special characters.
+- Use `python -m pip` instead of bare `pip`/`pip3` (avoids PATH resolution failures).
+- Check command existence with `Get-Command` (PowerShell) or `where.exe` (cmd) before invoking unfamiliar tools.

@@ -80,31 +80,56 @@ After a failed `exec`, `RecoveryEngine.analyze()` classifies stderr into one of
 Auto-recovery is deterministic (no LLM); when several rules match, the first rule
 that yields an auto-recovery action wins.
 
-| Category | Auto-recovery | Action |
-|----------|:---:|--------|
-| `command_not_found` | ✓ | `where.exe` resolves full path (only if `fallback=True`; else no action) |
-| `pip_not_found` | ✓ | bare `pip`/`pip3` → `python -m pip` |
-| `execution_policy_blocked` | ✓ | process-scoped `Set-ExecutionPolicy Bypass` prefix |
-| `encoding_mojibake` | ✓ | re-run via `cmd`+GBK codepage |
-| `python_not_found` | ✓ | `python` → `python3` |
-| `permission_denied` | | suggest: elevate / close locking process / `icacls` |
-| `path_not_found` | | suggest: `Test-Path`/`dir` before retry |
-| `syntax_error` | | suggest: quote paths |
-| `file_in_use` | | suggest: close Chrome/VSCode/etc. |
-| `git_not_available` | | suggest: use `wrap` file ops |
-| `node_not_found` | | suggest: verify `where.exe node` |
-| `module_not_found` | | suggest: `pip install` / `npm install` |
-| `disk_full` | | suggest: free space / other drive |
-| `network_unreachable` | | suggest: check connectivity/proxy |
-| `tls_cert_error` | | suggest: check clock/CA store (never blindly disable verify) |
-| `auth_failed` | | suggest: refresh credentials/token |
-| `path_too_long` | | suggest: long paths / `\\?\` prefix / shorten |
-| `already_exists` | | suggest: force flag or remove first |
-| `directory_not_empty` | | suggest: recursive `wrap rm` |
-| `argument_error` | | suggest: check flag compatibility |
-| `admin_required` | | suggest: elevated terminal / `-Verb RunAs` |
-| `timeout_or_hung` | | suggest: reduce input / check interactive prompt |
+| Category | Auto-recovery | Suggested cmd | Action |
+|----------|:---:|:---:|--------|
+| `command_not_found` | ✓ | | `where.exe` resolves full path (only if `fallback=True`; else no action) |
+| `pip_not_found` | ✓ | | bare `pip`/`pip3` → `python -m pip` |
+| `execution_policy_blocked` | ✓ | | process-scoped `Set-ExecutionPolicy Bypass` prefix |
+| `encoding_mojibake` | ✓ | | re-run via `cmd`+GBK codepage |
+| `python_not_found` | ✓ | | `python` → `python3` |
+| `permission_denied` | | | suggest: elevate / close locking process / `icacls` |
+| `path_not_found` | | ✓ | suggest: `Test-Path`/`dir` before retry |
+| `syntax_error` | | | suggest: quote paths |
+| `file_in_use` | | | suggest: close Chrome/VSCode/etc. |
+| `git_not_available` | | | suggest: use `wrap` file ops |
+| `node_not_found` | | | suggest: verify `where.exe node` |
+| `module_not_found` | | | suggest: `pip install` / `npm install` |
+| `disk_full` | | | suggest: free space / other drive |
+| `network_unreachable` | | | suggest: check connectivity/proxy |
+| `tls_cert_error` | | | suggest: check clock/CA store (never blindly disable verify) |
+| `auth_failed` | | | suggest: refresh credentials/token |
+| `path_too_long` | | | suggest: long paths / `\\?\` prefix / shorten |
+| `already_exists` | | ✓ | suggest: force flag or remove first |
+| `directory_not_empty` | | ✓ | suggest: recursive `wrap rm` |
+| `argument_error` | | | suggest: check flag compatibility |
+| `admin_required` | | | suggest: elevated terminal / `-Verb RunAs` |
+| `timeout_or_hung` | | | suggest: reduce input / check interactive prompt |
 
 **Substring-safety:** all-caps error codes (`ENOTFOUND`, `ENOSPC`, `EEXIST`,
 `ENOTEMPTY`, `MODULE_NOT_FOUND`) are anchored with `\b` word boundaries so they
 do not match inside unrelated words (e.g. `ModuleNotFoundError`).
+
+### `suggested_command` field
+
+Some suggestion-only categories also attach a deterministic `suggested_command`
+to the suggestion — a corrected command ready to feed straight back into `exec`.
+Unlike `auto_recovery`, it is **never auto-executed**: the recovery engine stays
+deterministic and the agent decides whether to run it.
+
+Currently produced for:
+
+- `path_not_found` — the offending path is normalized via `resolve` (WSL/UNC/
+  mixed-separator notations → canonical Windows path).
+- `already_exists` — a force flag is added to the original command.
+- `directory_not_empty` — rewritten as a recursive `wrap rm`.
+
+Example suggestion shape:
+
+```json
+{
+  "category": "path_not_found",
+  "severity": "medium",
+  "fix_hint": "Verify the path exists before retrying (Test-Path / dir).",
+  "suggested_command": "Get-ChildItem -Path 'C:\\Users\\me\\foo'"
+}
+```

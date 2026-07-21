@@ -5,8 +5,8 @@
 ## 一、整体架构
 
 ```
-cli.py            ← 唯一入口（argparse 分发 9 个子命令）
-  ├─ env_detect.py     环境探测（含版本/能力检测）
+cli.py            ← 唯一入口（argparse 分发 10 个子命令；dispatch() 为 serve/编程调用共用路由）
+  ├─ env_detect.py     环境探测（含版本/能力检测；300s TTL 文件缓存，--force 绕过）
   ├─ cmd_adapter.py    命令翻译引擎（读 config/adapters.json）
   ├─ exec_runner.py    执行器（壳层选择 + 编码 + ANSI + 恢复闭环）
   ├─ recovery.py       错误恢复引擎（分类 + 确定性自恢复）
@@ -20,7 +20,7 @@ config/adapters.json  ← 翻译规则库（正则 → 模板）
 assets/prompt-template.txt
 ```
 
-子命令：`detect` `translate` `exec` `wrap` `prompt` `capabilities` `resolve` `discover` `recover`
+子命令：`detect` `translate` `exec` `wrap` `prompt` `capabilities` `resolve` `discover` `recover` `serve`
 
 机制本质：**把"Linux 习惯 → Windows 正确行为"的映射做成一个可数据驱动的规则库（`adapters.json`），配一套壳层抽象（自动选最优 shell + 编码/ANSI 处理）和一套 shell 无关的安全文件操作（`wrap`），对外暴露 5 个统一子命令，所有执行结果收敛成结构化 JSON 供 agent 稳定解析。**
 
@@ -264,6 +264,58 @@ relative/dir     → 相对 cwd → resolve()
 - 扩展名优先级 `_EXT_PRIORITY = [.exe, '', .cmd, .bat, .ps1]`——**真 exe 优先于脚本包装器**
 - 排除 QClaw 的 `bash.cmd`/`bash.bat` 假阳性（`_EXCLUDE_SUFFIXES`）
 - 每个候选取第一个命中的扩展名即停
+
+## 五点八、守护进程与共享分发器（serve / dispatch）
+
+`serve` 子命令把 CLI 变成一个 **JSON-line 守护进程**，消灭每次调用的 Python
+解释器启动开销。协议：每方向每行一个 JSON 对象。
+
+```
+agent 输入: serve
+   │
+   ▼
+[1] 打印 ready 横幅:
+   {"ok": true, "ready": true, "actions": [detect, translate, exec, wrap, ...]}
+   │
+   ▼
+[2] for line in sys.stdin:           ← 阻塞读一行
+       request = json.loads(line)
+   │
+   ▼
+[3] dispatch(action, params)         ← 与一次性子命令共用的路由器
+       ├─ detect    → {"ok":True,"env":{...}}
+       ├─ translate → {translated, matched_rule, fallback, shell}
+       ├─ wrap grep → {"ok":True,"matches":[...]}
+       ├─ wrap 其它 → {"ok":True,"result":...}
+       └─ ...
+   │
+   ▼
+[4] print(json.dumps(result))        ← 一行回写；坏请求返回 {"ok":False,"error":...}
+                                       进程不退出，继续读下一行
+   │
+   ▼
+[5] {"action":"quit"} → {"ok":True,"bye":True} → 优雅退出
+```
+
+**关键点：`dispatch(action, params)` 是 serve 守护进程与编程调用的唯一共用
+路由**——守护进程不重复实现任何子命令逻辑，只是把 stdin 的 JSON 请求转交给
+`dispatch`，再把返回值序列化回 stdout。因此守护进程的输出与一次性 CLI 调用
+逐字段一致。`wrap grep` 在 dispatch 里特判走 `grep_from_args`，增强参数
+（`--context`/`--exclude-dir`/`--include`/`--case-sensitive`）由此可达。
+
+### detect 缓存机制
+
+`detect` 要探测大量工具版本，相对较慢，所以结果写入系统临时目录的
+**TTL 文件缓存**（`%TEMP%\windows-runtime-detect.json`，TTL=300s）：
+
+```
+detect(force=False)
+   ├─ 缓存存在 且 age < 300s → 直接返回缓存（近乎瞬时）
+   └─ 否则 → 重新探测 → 写缓存 → 返回
+detect(force=True) / detect --force → 跳过缓存读取，强制重新探测并刷新缓存
+```
+
+缓存只对 `detect` 生效；`exec`/`translate`/`wrap` 等无副作用查询不走缓存。
 
 ## 六、wrap（安全包装，绕过 shell）
 

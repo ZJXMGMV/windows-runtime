@@ -15,12 +15,25 @@ from typing import Iterable
 
 
 def safe_rm(path: str | Path) -> None:
-    """Remove a file or directory recursively."""
+    """Remove a file or directory recursively.
+
+    Raises OSError listing failed paths if any entries cannot be removed
+    (e.g. permission denied, file in use).
+    """
     target = Path(path)
     if not target.exists():
         return
     if target.is_dir():
-        shutil.rmtree(target, ignore_errors=True)
+        failures: list[str] = []
+
+        def _on_error(_func, _path, exc_info):
+            failures.append(f"{_path}: {exc_info[1]}")
+
+        shutil.rmtree(target, onerror=_on_error)
+        if failures:
+            raise OSError(
+                f"Failed to remove {len(failures)} item(s):\n" + "\n".join(failures)
+            )
     else:
         target.unlink(missing_ok=True)
 
@@ -68,11 +81,34 @@ def safe_write(path: str | Path, content: str, encoding: str = "utf-8") -> None:
     target.write_text(content, encoding=encoding, errors="replace")
 
 
-def safe_grep(pattern: str, files: Iterable[str | Path], case_sensitive: bool = False) -> list[str]:
+def safe_append(path: str | Path, content: str, encoding: str = "utf-8") -> None:
+    """Append text to a file, creating parent directories as needed."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a", encoding=encoding, errors="replace") as f:
+        f.write(content)
+
+
+def safe_grep(
+    pattern: str,
+    files: Iterable[str | Path],
+    case_sensitive: bool = False,
+    context: int = 0,
+    exclude_dir: str | list[str] | None = None,
+    include: str | list[str] | None = None,
+) -> list[str]:
     """Grep-like search across files.
 
     ``files`` can be glob patterns (e.g. '*.py') or explicit paths.
     Patterns are expanded relative to cwd.
+
+    Args:
+        pattern: Regex pattern to search for.
+        files: File paths or glob patterns to search.
+        case_sensitive: If False (default), search is case-insensitive.
+        context: Number of lines before/after each match to include (like grep -C).
+        exclude_dir: Directory name(s) to skip during traversal (e.g. 'node_modules').
+        include: File extension(s) to include (e.g. '.py' or 'py'). Only matching files are searched.
     """
     import glob as _glob
 
@@ -80,6 +116,26 @@ def safe_grep(pattern: str, files: Iterable[str | Path], case_sensitive: bool = 
         files = [str(files)]
     flags = 0 if case_sensitive else re.IGNORECASE
     regex = re.compile(pattern, flags)
+
+    # Normalize exclude_dir to a set of lowercase names
+    excluded_dirs: set[str] = set()
+    if exclude_dir:
+        if isinstance(exclude_dir, str):
+            exclude_dir = [exclude_dir]
+        excluded_dirs = {d.lower().strip("/\\").rstrip("/\\") for d in exclude_dir}
+
+    # Normalize include to a set of lowercase extensions (with leading dot)
+    include_exts: set[str] | None = None
+    if include:
+        if isinstance(include, str):
+            include = [include]
+        include_exts = set()
+        for ext in include:
+            ext = ext.lower().strip()
+            if not ext.startswith("."):
+                ext = "." + ext
+            include_exts.add(ext)
+
     matches: list[str] = []
     expanded_files: list[str] = []
     for f in files:
@@ -88,25 +144,54 @@ def safe_grep(pattern: str, files: Iterable[str | Path], case_sensitive: bool = 
         fstr = os.path.normpath(str(f))
         if any(ch in fstr for ch in '*?[]'):
             try:
-                # Use glob with root_dir to avoid scandir('.') permission issues on Windows
-                import glob as _glob
                 expanded_files.extend(
                     _glob.glob(fstr, recursive=True, root_dir=os.getcwd())
                 )
             except (OSError, PermissionError):
-                # Fallback: if cwd scan fails, try absolute resolution
                 expanded_files.extend(_glob.glob(fstr, recursive=True))
         else:
             expanded_files.append(fstr)
+
     # Deduplicate while preserving order
-    seen = set()
+    seen: set[str] = set()
     for fp in expanded_files:
-        if fp not in seen:
-            seen.add(fp)
-            text = safe_read(fp)
-            for line_no, line in enumerate(text.splitlines(), 1):
-                if regex.search(line):
-                    matches.append(f"{fp}:{line_no}:{line}")
+        if fp in seen:
+            continue
+        seen.add(fp)
+
+        # Skip excluded directories
+        if excluded_dirs:
+            parts = Path(fp).parts
+            if any(p.lower() in excluded_dirs for p in parts):
+                continue
+
+        # Filter by extension
+        if include_exts:
+            if Path(fp).suffix.lower() not in include_exts:
+                continue
+
+        text = safe_read(fp)
+        lines = text.splitlines()
+        matched_indices: set[int] = set()
+        for idx, line in enumerate(lines):
+            if regex.search(line):
+                matched_indices.add(idx)
+
+        if not matched_indices:
+            continue
+
+        # Expand context around matches
+        output_indices: set[int] = set()
+        for idx in matched_indices:
+            for offset in range(-context, context + 1):
+                target = idx + offset
+                if 0 <= target < len(lines):
+                    output_indices.add(target)
+
+        for idx in sorted(output_indices):
+            separator = ":" if idx in matched_indices else "-"
+            matches.append(f"{fp}:{idx + 1}{separator}{lines[idx]}")
+
     return matches
 
 
@@ -136,11 +221,70 @@ OPERATIONS = {
     "move": safe_move,
     "read": safe_read,
     "write": safe_write,
+    "append": safe_append,
     "grep": safe_grep,
     "find": safe_find,
     "env": safe_env,
     "path": safe_path,
 }
+
+
+def grep_from_args(args: list[str]) -> list[str]:
+    """Parse mixed positional + flag args and run :func:`safe_grep`.
+
+    The enhanced ``safe_grep`` parameters are keyword-only, but the ``wrap grep``
+    CLI subcommand and the ``dispatch("wrap")`` path both pass arguments
+    positionally. This bridge accepts the following syntax so those entry points
+    can reach the full feature set:
+
+    Positional:
+        pattern   first positional argument (regex)
+        files     remaining positional arguments (paths or globs; default ``*``)
+
+    Flags:
+        --context N        lines of context before/after each match (grep -C)
+        --exclude-dir X    directory name to skip (repeatable)
+        --include X        file extension to include, e.g. ``py``/``.py`` (repeatable)
+        --case-sensitive   match case-sensitively (default is case-insensitive)
+    """
+    positional: list[str] = []
+    context = 0
+    exclude_dir: list[str] = []
+    include: list[str] = []
+    case_sensitive = False
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--context":
+            context = int(args[i + 1])
+            i += 2
+        elif arg == "--exclude-dir":
+            exclude_dir.append(args[i + 1])
+            i += 2
+        elif arg == "--include":
+            include.append(args[i + 1])
+            i += 2
+        elif arg == "--case-sensitive":
+            case_sensitive = True
+            i += 1
+        else:
+            positional.append(arg)
+            i += 1
+
+    if not positional:
+        raise ValueError("grep requires a pattern and at least one file/glob")
+
+    pattern = positional[0]
+    files = positional[1:] or ["*"]
+    return safe_grep(
+        pattern,
+        files,
+        case_sensitive=case_sensitive,
+        context=context,
+        exclude_dir=exclude_dir or None,
+        include=include or None,
+    )
 
 
 def main() -> int:
@@ -154,7 +298,7 @@ def main() -> int:
         print(f"Unknown operation: {op}")
         return 1
 
-    if op == "write":
+    if op in ("write", "append"):
         # Multi-line content cannot be passed reliably via CLI args (shell quoting
         # mangles newlines). Accept --from-file <path> to read content from a file.
         args = sys.argv[2:]
@@ -170,9 +314,21 @@ def main() -> int:
                     target = args[i]
                 i += 1
         if target is None:
-            print("Error: write requires a target path", file=sys.stderr)
+            print(f"Error: {op} requires a target path", file=sys.stderr)
             return 1
-        safe_write(target, content)
+        OPERATIONS[op](target, content)
+        return 0
+
+    if op == "grep":
+        # Route through grep_from_args so the enhanced flags
+        # (--context/--exclude-dir/--include/--case-sensitive) reach safe_grep.
+        try:
+            matches = grep_from_args(sys.argv[2:])
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        for line in matches:
+            print(line)
         return 0
 
     func = OPERATIONS[op]

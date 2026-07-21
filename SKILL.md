@@ -1,5 +1,6 @@
 ---
 name: windows-runtime
+version: 1.1.0
 description: Windows command-line compatibility layer for AI agents. Use when an agent needs to execute shell commands on Windows outside WSL, especially when the agent generates Linux/Bash-style commands (rm, cat, grep, export, chmod, etc.) that fail on Windows. Provides command translation, unified execution, safe file wrappers, and environment detection. Works with OpenClaw, Codex CLI, OpenCode, and Hermes via the Agent Skills standard.
 ---
 
@@ -51,6 +52,10 @@ Use this skill when:
    ```powershell
    python scripts/cli.py discover git
    ```
+9. Run many commands in one long-lived process (daemon mode):
+   ```powershell
+   python scripts/cli.py serve
+   ```
 
 ## Shell priority
 
@@ -83,10 +88,13 @@ For operations that are fragile or error-prone across shells, use Python wrapper
 - `safe_mkdir(path)` — create directories recursively
 - `safe_copy(src, dst)` / `safe_move(src, dst)`
 - `safe_read(path)` / `safe_write(path, content)`
-- `safe_grep(pattern, files)` / `safe_find(root, pattern)`
+- `safe_grep(pattern, files, *, case_sensitive=False, context=0, exclude_dir=None, include=None)` / `safe_find(root, pattern)`
 - `safe_env(name, value=None)` / `safe_path(path)`
 
-See [references/tool-wrappers.md](references/tool-wrappers.md) for details.
+`safe_grep` supports context lines, directory exclusion, and extension filtering;
+the same options are reachable from the CLI/dispatch as `--context N`,
+`--exclude-dir X`, `--include X`, and `--case-sensitive` flags. See
+[references/tool-wrappers.md](references/tool-wrappers.md) for details.
 
 ## Capabilities manifest (P2)
 
@@ -103,6 +111,10 @@ python scripts/cli.py capabilities
 
 `detect` also returns the extended capability block (`python`, `node`, `git`, `cargo`, `docker`, `wsl`, `admin`, `network`, version strings).
 
+Detection probes many tool versions and is comparatively slow, so the result is
+cached for 300s (TTL) in the system temp dir. Repeat calls are near-instant; use
+`detect --force` to bypass the cache and re-probe.
+
 ## Error recovery & retry loop (P2)
 
 `exec` runs a two-stage pipeline: **Stage 1** naive OS/timeout retries, **Stage 2** a deterministic Error Recovery Engine (no LLM). On failure the engine classifies the error into one of **22 categories**, emits `fix_hint`s, and — where safe — retries once with an auto-recovery action. When several rules match, the first rule that yields an auto-recovery action wins (deterministic).
@@ -114,7 +126,15 @@ Auto-recovery categories (retry once):
 - `encoding_mojibake` → re-runs via `cmd`+GBK codepage.
 - `python_not_found` → retries with `python3`.
 
-Suggestion-only categories (no auto-execute): `permission_denied`, `path_not_found`, `syntax_error`, `file_in_use`, `git_not_available`, `node_not_found`, `module_not_found`, `disk_full`, `network_unreachable`, `tls_cert_error`, `auth_failed`, `path_too_long`, `already_exists`, `directory_not_empty`, `argument_error`, `admin_required`, `timeout_or_hung`.
+The remaining 17 categories are suggestion-only (no auto-execute) — each returns
+a `fix_hint`. See [references/error-patterns.md](references/error-patterns.md)
+for the full 22-category table.
+
+Some suggestion-only categories also carry a deterministic `suggested_command` —
+a corrected command ready to feed straight back into `exec`. It is **never
+auto-executed** (the recovery engine stays deterministic); the agent decides.
+Currently produced for `path_not_found` (path normalized via `resolve`),
+`already_exists` (force flag added), and `directory_not_empty` (recursive remove).
 
 Recovery is on by default; disable with `exec --no-recover`. Analyze a result without executing via `recover`:
 
@@ -142,6 +162,23 @@ python scripts/cli.py discover git      # -> resolved path + candidates
 python scripts/cli.py discover          # -> all known tools
 ```
 
+## Daemon mode (serve)
+
+Each `cli.py` invocation pays Python interpreter startup cost. When running many
+commands in a row, start one long-lived process instead:
+
+```powershell
+python scripts/cli.py serve
+```
+
+`serve` speaks one JSON object per line in each direction. Send
+`{"action": "translate", "params": {"command": "ls -la"}}` and read back
+`{"ok": true, "translated": "Get-ChildItem -Force", ...}`. It supports every
+subcommand (`detect`/`translate`/`exec`/`wrap`/`resolve`/`recover`/...) through a
+shared dispatcher, and shuts down gracefully on `{"action": "quit"}`. See
+[references/agent-workflow.md](references/agent-workflow.md) Scenario 6 for the
+full protocol (ready banner, action list, error responses).
+
 ## Common Windows errors
 
 See [references/error-patterns.md](references/error-patterns.md) for common error messages and how this skill handles them.
@@ -154,7 +191,7 @@ Run the suite from the skill root:
 python tests/run_all.py
 ```
 
-It runs two data-driven harnesses:
+It runs three data-driven harnesses:
 
 - `tests/test_recovery_rules.py` over `recovery_fixtures.json` — for every
   recovery rule, asserts (1) positive samples classify to the right category,

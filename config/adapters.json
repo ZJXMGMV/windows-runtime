@@ -186,6 +186,42 @@
       "pwsh": "(Get-Content -Path '{{file}}' | Measure-Object -Line).Lines",
       "cmd": "find /C /V \"\" < \"{{file}}\"",
       "bash": "wc -l '{{file}}'"
+    },
+    "du -sh": {
+      "pattern": "^\\s*du\\s+-sh\\s+(?P<path>\\S+)$",
+      "pwsh": "'{0:N2} MB' -f ((Get-ChildItem -Path '{{path}}' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB)",
+      "cmd": "powershell -NoProfile -Command \"'{0:N2} MB' -f ((Get-ChildItem -Path '{{path}}' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB)\"",
+      "bash": "du -sh '{{path}}'"
+    },
+    "kill": {
+      "pattern": "^\\s*kill\\s+(?P<pid>\\d+)$",
+      "pwsh": "Stop-Process -Id {{pid}} -Force -ErrorAction SilentlyContinue",
+      "cmd": "taskkill /PID {{pid}} /F",
+      "bash": "kill {{pid}}"
+    },
+    "kill -9": {
+      "pattern": "^\\s*kill\\s+-9\\s+(?P<pid>\\d+)$",
+      "pwsh": "Stop-Process -Id {{pid}} -Force -ErrorAction SilentlyContinue",
+      "cmd": "taskkill /PID {{pid}} /F",
+      "bash": "kill -9 {{pid}}"
+    },
+    "diff": {
+      "pattern": "^\\s*diff\\s+(?P<file1>\\S+)\\s+(?P<file2>\\S+)$",
+      "pwsh": "Compare-Object (Get-Content '{{file1}}') (Get-Content '{{file2}}')",
+      "cmd": "fc \"{{file1}}\" \"{{file2}}\"",
+      "bash": "diff '{{file1}}' '{{file2}}'"
+    },
+    "env": {
+      "pattern": "^\\s*(?:env|printenv)\\s*$",
+      "pwsh": "Get-ChildItem env: | Format-Table -AutoSize",
+      "cmd": "set",
+      "bash": "env"
+    },
+    "curl": {
+      "pattern": "^\\s*curl\\s+(?P<args>.+)$",
+      "pwsh": "curl.exe {{args}}",
+      "cmd": "curl.exe {{args}}",
+      "bash": "curl {{args}}"
     }
   }
 }

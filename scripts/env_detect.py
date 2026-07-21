@@ -14,8 +14,16 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
+
+# Default cache TTL in seconds
+DEFAULT_TTL = 300
+
+# Cache file location
+_CACHE_FILE = Path(tempfile.gettempdir()) / "windows-runtime-detect.json"
 
 
 def _configure_utf8_stdout() -> None:
@@ -36,8 +44,24 @@ class EnvDetect:
     def __init__(self) -> None:
         self._info: dict[str, Any] = {}
 
-    def detect(self) -> dict[str, Any]:
-        self._info = {
+    def detect(self, force: bool = False, ttl: int = DEFAULT_TTL) -> dict[str, Any]:
+        """Detect environment, using a file-based cache to avoid repeated subprocess calls.
+
+        Args:
+            force: Bypass cache and re-detect.
+            ttl: Cache validity in seconds (default 300).
+        """
+        if not force:
+            cached = self._read_cache(ttl)
+            if cached is not None:
+                self._info = cached
+                return cached
+        self._info = self._detect_full()
+        self._write_cache(self._info)
+        return self._info
+
+    def _detect_full(self) -> dict[str, Any]:
+        return {
             "os": self._detect_os(),
             "shell": self._detect_shell(),
             "encoding": self._detect_encoding(),
@@ -45,7 +69,27 @@ class EnvDetect:
             "long_path_support": self._detect_long_path_support(),
             "capabilities": self._detect_capabilities(),
         }
-        return self._info
+
+    def _read_cache(self, ttl: int) -> dict[str, Any] | None:
+        """Read cached detection if it exists and is within TTL."""
+        try:
+            if not _CACHE_FILE.exists():
+                return None
+            raw = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+            ts = raw.get("timestamp", 0)
+            if time.time() - ts > ttl:
+                return None
+            return raw.get("data")
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _write_cache(self, data: dict[str, Any]) -> None:
+        """Write detection results to cache file."""
+        try:
+            payload = {"timestamp": time.time(), "data": data}
+            _CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass  # Cache write failure is non-fatal
 
     def _detect_os(self) -> dict[str, str]:
         return {

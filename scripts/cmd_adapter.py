@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from compound_splitter import is_compound, split_compound, reassemble
+
 
 class CommandTranslator:
     """Translate Bash-style commands to Windows shell commands."""
@@ -36,7 +38,11 @@ class CommandTranslator:
     def translate(self, cmd: str, shell: str = "pwsh") -> dict[str, Any]:
         """Translate a command to the target shell.
 
+        Handles compound commands (&&, ||, ;) by splitting, translating each
+        segment independently, and reassembling with shell-appropriate operators.
+
         Returns a dict with keys: original, translated, shell, matched_rule, fallback.
+        For compound commands, matched_rule is "compound" and fallback is False.
         """
         cmd = cmd.strip()
         if not cmd:
@@ -48,6 +54,32 @@ class CommandTranslator:
                 "fallback": False,
             }
 
+        # Compound command: split, translate each segment, reassemble
+        if is_compound(cmd):
+            segments = split_compound(cmd)
+            if len(segments) > 1:
+                translated_segments = []
+                any_matched = False
+                for segment_cmd, operator in segments:
+                    seg_result = self._translate_single(segment_cmd, shell)
+                    any_matched = any_matched or (seg_result["matched_rule"] is not None)
+                    translated_segments.append({
+                        "translated": seg_result["translated"],
+                        "operator": operator,
+                    })
+                reassembled = reassemble(translated_segments, shell)
+                return {
+                    "original": cmd,
+                    "translated": reassembled,
+                    "shell": shell,
+                    "matched_rule": "compound" if any_matched else None,
+                    "fallback": not any_matched,
+                }
+
+        return self._translate_single(cmd, shell)
+
+    def _translate_single(self, cmd: str, shell: str) -> dict[str, Any]:
+        """Translate a single (non-compound) command."""
         shell_key = self._resolve_shell_key(shell)
 
         # Try exact adapters first
