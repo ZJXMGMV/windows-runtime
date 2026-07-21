@@ -73,6 +73,12 @@
       "cmd": "xcopy \"{{src}}\" \"{{dst}}\" /E /I /Y",
       "bash": "cp -r '{{src}}' '{{dst}}'"
     },
+    "cp -a": {
+      "pattern": "^\\s*cp\\s+-a\\s+(?P<src>.+)\\s+(?P<dst>.+)$",
+      "pwsh": "robocopy.exe '{{src}}' '{{dst}}' /E /COPY:DAT /R:0 /W:0 /NFL /NDL",
+      "cmd": "xcopy /E /H /I \"{{src}}\" \"{{dst}}\"",
+      "bash": "cp -a '{{src}}' '{{dst}}'"
+    },
     "mv": {
       "pattern": "^\\s*mv\\s+(?P<src>\\S+)\\s+(?P<dst>\\S+)$",
       "pwsh": "Move-Item -Path '{{src}}' -Destination '{{dst}}' -Force",
@@ -110,8 +116,8 @@
       "bash": "find '{{root}}' -name '{{pattern}}'"
     },
     "export": {
-      "pattern": "^\\s*export\\s+(?P<name>\\w+)\\s*=\\s*(?P<value>\\S+)$",
-      "pwsh": "$env:{{name}} = '{{value}}'",
+      "pattern": "^\\s*export\\s+(?P<name>\\w+)\\s*=\\s*(?P<value>.+)$",
+      "pwsh": "$env:{{name}} = \"{{value}}\"",
       "cmd": "set {{name}}={{value}}",
       "bash": "export {{name}}={{value}}"
     },
@@ -129,7 +135,7 @@
     },
     "echo literal": {
       "pattern": "^\\s*echo\\s+(?P<text>.+)$",
-      "pwsh": "Write-Output \"{{text}}\"",
+      "pwsh": "Write-Output '{{text}}'",
       "cmd": "echo {{text}}",
       "bash": "echo {{text}}"
     },
@@ -222,6 +228,18 @@
       "pwsh": "curl.exe {{args}}",
       "cmd": "curl.exe {{args}}",
       "bash": "curl {{args}}"
+    },
+    "find -exec grep": {
+      "pattern": "^\\s*find\\s+(?P<root>\\S+)\\s+-name\\s+(?P<pattern>\\S+)\\s+-exec\\s+grep\\s+(?P<grepflags>-\\w+)\\s+(?P<term>\\S+)\\s+\\{\\}\\s*\\\\;$",
+      "pwsh": "Get-ChildItem -Path '{{root}}' -Recurse -Filter {{pattern}} -ErrorAction SilentlyContinue | Select-String -Pattern {{term}} -List | Select-Object -ExpandProperty Path",
+      "cmd": "findstr /S /I /M {{term}} \"{{root}}\\{{pattern}}\"",
+      "bash": "find '{{root}}' -name '{{pattern}}' -exec grep {{grepflags}} {{term}} {} \\;"
+    },
+    "source": {
+      "pattern": "^\\s*(?:source|\\.)\\s+(?P<path>\\S+)$",
+      "pwsh": ". '{{path}}'",
+      "cmd": "call \"{{path}}\"",
+      "bash": "source '{{path}}'"
     }
   }
 }

@@ -330,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_wrap.set_defaults(func=cmd_wrap)
 
     p_cap = sub.add_parser("capabilities", help="Emit capabilities manifest for agent planning")
+    p_cap.add_argument("--json", action="store_true", help="Output JSON (default for this subcommand)")
     p_cap.set_defaults(func=cmd_capabilities)
 
     p_resolve = sub.add_parser("resolve", help="Normalize a path to canonical Windows form")

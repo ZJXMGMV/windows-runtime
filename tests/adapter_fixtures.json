@@ -23,6 +23,10 @@
       "outputs": {"pwsh": "Copy-Item -Path 's' -Destination 'd' -Recurse -Force", "cmd": "xcopy \"s\" \"d\" /E /I /Y"}
     },
     {
+      "in": "cp -a src dst", "expect_rule": "cp -a", "expect_fallback": false,
+      "outputs": {"pwsh": "robocopy.exe 'src' 'dst' /E /COPY:DAT /R:0 /W:0 /NFL /NDL", "cmd": "xcopy /E /H /I \"src\" \"dst\""}
+    },
+    {
       "in": "mv a b", "expect_rule": "mv", "expect_fallback": false,
       "outputs": {"pwsh": "Move-Item -Path 'a' -Destination 'b' -Force"}
     },
@@ -57,7 +61,7 @@
     },
     {
       "in": "export FOO=bar", "expect_rule": "export", "expect_fallback": false,
-      "outputs": {"pwsh": "$env:FOO = 'bar'", "cmd": "set FOO=bar"}
+      "outputs": {"pwsh": "$env:FOO = \"bar\"", "cmd": "set FOO=bar"}
     },
     {
       "in": "unset FOO", "expect_rule": "unset", "expect_fallback": false,
@@ -69,7 +73,7 @@
     },
     {
       "in": "echo hello world", "expect_rule": "echo literal", "expect_fallback": false,
-      "outputs": {"pwsh": "Write-Output \"hello world\"", "cmd": "echo hello world"}
+      "outputs": {"pwsh": "Write-Output 'hello world'", "cmd": "echo hello world"}
     },
     {
       "in": "chmod +x s.sh", "expect_rule": "chmod +x", "expect_fallback": false,
@@ -138,6 +142,30 @@
     {
       "in": "curl -s https://example.com", "expect_rule": "curl", "expect_fallback": false,
       "outputs": {"pwsh": "curl.exe -s https://example.com", "cmd": "curl.exe -s https://example.com"}
+    },
+    {
+      "in": "cat file.txt > output.txt", "expect_rule": "cat", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Content -Path 'file.txt' -Raw | Out-File -FilePath 'output.txt' -Encoding utf8", "cmd": "type \"file.txt\" > output.txt"}
+    },
+    {
+      "in": "cat file.txt > output.txt 2>&1", "expect_rule": "cat", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-Content -Path 'file.txt' -Raw 2>&1 | Out-File -FilePath 'output.txt' -Encoding utf8"}
+    },
+    {
+      "in": "echo hello >> log.txt", "expect_rule": "echo literal", "expect_fallback": false,
+      "outputs": {"pwsh": "Write-Output 'hello' | Out-File -FilePath 'log.txt' -Append -Encoding utf8"}
+    },
+    {
+      "in": "find . -name '*.py' -exec grep -l 'TODO' {} \\;", "expect_rule": "find -exec grep", "expect_fallback": false,
+      "outputs": {"pwsh": "Get-ChildItem -Path '.' -Recurse -Filter '*.py' -ErrorAction SilentlyContinue | Select-String -Pattern 'TODO' -List | Select-Object -ExpandProperty Path"}
+    },
+    {
+      "in": "source ./env.sh", "expect_rule": "source", "expect_fallback": false,
+      "outputs": {"pwsh": ". './env.sh'", "cmd": "call \"./env.sh\""}
+    },
+    {
+      "in": ". ./env.sh", "expect_rule": "source", "expect_fallback": false,
+      "outputs": {"pwsh": ". './env.sh'"}
     },
 
     {"in": "git status", "expect_rule": null, "expect_fallback": true},

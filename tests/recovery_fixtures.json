@@ -69,7 +69,9 @@
     "admin_required": {
       "positive": [
         "需要管理员权限才能执行此操作。",
-        "The requested operation requires elevation. Run as administrator."
+        "The requested operation requires elevation. Run as administrator.",
+        "This operation is not elevated enough to complete.",
+        "Administrator required to perform this action."
       ],
       "also_ok": [],
       "negative": ["Access is denied."]
@@ -96,7 +98,8 @@
       "positive": [
         "node : 无法将\u201cnode\u201d项识别为 cmdlet",
         "npm: command not found",
-        "npx : 无法将\u201cnpx\u201d项识别为 cmdlet"
+        "npx : 无法将\u201cnpx\u201d项识别为 cmdlet",
+        "This package requires node >= 18.0.0 but the current version is not supported."
       ],
       "also_ok": ["command_not_found"],
       "negative": ["ModuleNotFoundError: No module named 'requests'"]
@@ -128,7 +131,9 @@
         "fatal: unable to access 'https://x/': Could not resolve host: github.com",
         "curl: (28) Connection timed out",
         "Error: connect ETIMEDOUT 1.2.3.4:443",
-        "Error: getaddrinfo ENOTFOUND registry.npmjs.org"
+        "Error: getaddrinfo ENOTFOUND registry.npmjs.org",
+        "Could not connect to server at https://api.example.com",
+        "Error: connect ECONNREFUSED 127.0.0.1:5432"
       ],
       "also_ok": [],
       "negative": [
@@ -149,7 +154,9 @@
       "positive": [
         "remote: Support for password authentication was removed. fatal: Authentication failed",
         "HTTP 401 Unauthorized",
-        "remote: Permission to org/repo denied to user."
+        "remote: Permission to org/repo denied to user.",
+        "Authorization failed: insufficient scope for this operation.",
+        "Error: Your token has expired. Please re-authenticate."
       ],
       "also_ok": [],
       "negative": ["访问被拒绝。"]
@@ -167,7 +174,8 @@
         "目标目录已经存在。",
         "mkdir: cannot create directory 'x': File exists",
         "A subdirectory or file build already exists.",
-        "Error: EEXIST: file already exists"
+        "Error: EEXIST: file already exists",
+        "Item has already been created. Use a different name."
       ],
       "also_ok": [],
       "negative": ["The directory is not empty."]

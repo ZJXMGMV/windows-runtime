@@ -315,7 +315,7 @@ _register(
 
 _register(
     "admin_required",
-    r"需要管理员权限|administrator privilege|required privilege|Run as administrator",
+    r"需要管理员权限|administrator privilege|required privilege|Run as administrator|not elevated|Administrator required|requires elevation|requires administrative|elevated prompt",
     "Administrator access required. Re-run the agent from an elevated terminal or use `Start-Process -Verb RunAs`.",
 )
 
@@ -336,8 +336,8 @@ _register(
 
 _register(
     "node_not_found",
-    r"(node|npm|npx).*(无法将|not recognized|not found)",
-    "Node.js/npm not on PATH. Verify with `where.exe node`; install Node or add it to PATH.",
+    r"(node|npm|npx).*(无法将|not recognized|not found)|node\.?js.*required.*found|engine.*incompatible|requires node|wrong version of node|unsupported node",
+    "Node.js/npm not on PATH or wrong version. Verify with `where.exe node`; install Node or add it to PATH.",
 )
 
 _register(
@@ -354,7 +354,7 @@ _register(
 
 _register(
     "network_unreachable",
-    r"could not resolve host|Could not resolve|Connection timed out|\bETIMEDOUT\b|\bENOTFOUND\b|network is unreachable|Failed to connect|Temporary failure in name resolution",
+    r"could not resolve host|Could not resolve|Could not connect|unable to connect|connection refused|Connection timed out|\bETIMEDOUT\b|\bENOTFOUND\b|\bECONNREFUSED\b|\bECONNRESET\b|\bEAI_AGAIN\b|network is unreachable|Failed to connect|Temporary failure in name resolution",
     "Network/DNS failure. Check connectivity or proxy settings (HTTP(S)_PROXY); retry after the network recovers.",
 )
 
@@ -366,7 +366,7 @@ _register(
 
 _register(
     "auth_failed",
-    r"Authentication failed|401 Unauthorized|403 Forbidden|Permission to .* denied|invalid credentials|fatal: could not read Username",
+    r"Authentication failed|Authorization failed|authorization required|401 Unauthorized|403 Forbidden|Permission to .* denied|invalid credentials|bad credentials|token.*(expired|invalid|revoked)|fatal: could not read Username",
     "Authentication failed. Refresh credentials/token (e.g. `gh auth login`, Git credential manager) then retry.",
 )
 
@@ -378,7 +378,7 @@ _register(
 
 _register(
     "already_exists",
-    r"已经存在|already exists|File exists|Cannot create a file when that file already exists|\bEEXIST\b",
+    r"已经存在|already exists|File exists|Cannot create a file when that file already exists|\bEEXIST\b|has already been created|item already exists",
     "Target already exists. Use a force/overwrite flag, or remove the existing item first (`wrap rm`).",
 )
 
